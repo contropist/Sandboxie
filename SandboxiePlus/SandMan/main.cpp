@@ -29,8 +29,26 @@ int main(int argc, char *argv[])
 	QString ConfDir = AppDir + "\\PlusData";
 	if(!QFile::exists(ConfDir))
 		ConfDir = AppDir;
+	
+	// todo: Remove import at some later point
+	{
+		QStringList dirs = QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation);
+		if (dirs.count() > 2) { // Note: last 2 are AppDir and AppDir/data
+			QString OldPath;
+			QString NewPath;
+			if (dirs.count() > 3 && QFile::exists((OldPath = dirs[1] + "/Sandboxie-Plus") + "/Sandboxie-Plus.ini"))
+				NewPath = dirs[1] + "/Xanasoft";
+			else if (QFile::exists((OldPath = dirs[0] + "/Sandboxie-Plus") + "/Sandboxie-Plus.ini"))
+				NewPath = dirs[0] + "/Xanasoft";
+		
+			if (!NewPath.isEmpty() && !QFile::exists(NewPath + "/Sandboxie-Plus" + "/Sandboxie-Plus.ini")){
+				QDir().mkpath(NewPath);
+				QDir().rename(OldPath, NewPath + "/Sandboxie-Plus");
+			}
+		}
+	}
 	// use a shared setting location when used in a business environment for easier administration
-	theConf = new CSettings(ConfDir, "Sandboxie-Plus");
+	theConf = new CSettings(ConfDir, "Xanasoft", "Sandboxie-Plus");
 
 #ifndef _DEBUG
 	InitMiniDumpWriter(QString("SandMan-v%1").arg(CSandMan::GetVersion()).toStdWString().c_str() , QString(theConf->GetConfigDir()).replace("/", "\\").toStdWString().c_str());
@@ -43,7 +61,7 @@ int main(int argc, char *argv[])
 		//SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
 		//SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
 		typedef DPI_AWARENESS_CONTEXT(WINAPI* P_SetThreadDpiAwarenessContext)(DPI_AWARENESS_CONTEXT dpiContext);
-		P_SetThreadDpiAwarenessContext pSetThreadDpiAwarenessContext = (P_SetThreadDpiAwarenessContext)GetProcAddress(GetModuleHandle(L"user32.dll"), "SetThreadDpiAwarenessContext");
+		P_SetThreadDpiAwarenessContext pSetThreadDpiAwarenessContext = (P_SetThreadDpiAwarenessContext)GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetThreadDpiAwarenessContext");
 		if(pSetThreadDpiAwarenessContext) // not present on windows 7
 			pSetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
 		else
@@ -65,7 +83,7 @@ int main(int argc, char *argv[])
 
 	//InitConsole(false);
 
-	bool IsBoxed = GetModuleHandle(L"SbieDll.dll") != NULL;
+	bool IsBoxed = GetModuleHandleW(L"SbieDll.dll") != NULL;
 
 	if (!IsBoxed) {
 		SB_STATUS Status = CSbieUtils::DoAssist();
@@ -111,8 +129,21 @@ int main(int argc, char *argv[])
 		}
 	}
 	int DfpPos = Args.indexOf("/disable_force", Qt::CaseInsensitive);
-	// the first argument wins
-	if (BoxPos != -1 && DfpPos != -1) {
+	int AfpPos = Args.indexOf("/add_force", Qt::CaseInsensitive);
+	int AOPos = Args.indexOf("/add_open", Qt::CaseInsensitive);
+
+	//Add_Force has the highest priority.
+	if (AfpPos != -1) {
+		DfpPos = -1;
+		BoxPos = -1;
+	}
+	else if (AOPos != -1)
+	{
+		DfpPos = -1;
+		BoxPos = -1;
+	}
+		// the first argument wins
+	else if (BoxPos != -1 && DfpPos != -1) {
 		if (BoxPos < DfpPos) DfpPos = -1;
 		else				 BoxPos = -1;
 	}
@@ -130,7 +161,7 @@ int main(int argc, char *argv[])
 		if (!cmdLine) return -2;
 
 		if (IsBoxed) {
-			ShellExecute(NULL, L"open", cmdLine + 1, NULL, NULL, SW_SHOWNORMAL);
+			ShellExecuteW(NULL, L"open", cmdLine + 1, NULL, NULL, SW_SHOWNORMAL);
 			return 0;
 		}
 
@@ -149,7 +180,7 @@ int main(int argc, char *argv[])
 		LPWSTR cmdLine = cmdLine0 + 14;
 
 		if (IsBoxed) {
-			ShellExecute(NULL, L"open", cmdLine + 1, NULL, NULL, SW_SHOWNORMAL);
+			ShellExecuteW(NULL, L"open", cmdLine + 1, NULL, NULL, SW_SHOWNORMAL);
 			return 0;
 		}
 
@@ -158,7 +189,18 @@ int main(int argc, char *argv[])
 
 		g_PendingMessage += "\nIn:*DFP*";
 	}
-
+	if (AfpPos != -1) {
+		LPWSTR cmdLine0 = wcsstr(GetCommandLineW(), L"/add_force");
+		if (!cmdLine0) return -1;
+		LPWSTR cmdLine = cmdLine0 + 10;
+		g_PendingMessage = "AddForce:" + QString::fromWCharArray(cmdLine + 1);
+	}
+	if (AOPos != -1) {
+		LPWSTR cmdLine0 = wcsstr(GetCommandLineW(), L"/add_open");
+		if (!cmdLine0) return -1;
+		LPWSTR cmdLine = cmdLine0 + 9;
+		g_PendingMessage = "AddOpen:" + QString::fromWCharArray(cmdLine + 1);
+	}
 	
 	if (IsBoxed) {
 		QMessageBox::critical(NULL, "Sandboxie-Plus", CSandMan::tr("Sandboxie Manager can not be run sandboxed!"));

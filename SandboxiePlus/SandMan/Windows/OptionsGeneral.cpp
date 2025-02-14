@@ -87,17 +87,18 @@ void COptionsWindow::CreateGeneral()
 		}
 	}
 
-	if (!CERT_IS_LEVEL(g_CertInfo, eCertStandard)) {
-		QWidget* ExWidgets[] = { ui.chkSecurityMode, ui.chkLockDown, ui.chkRestrictDevices,
-			ui.chkPrivacy, ui.chkUseSpecificity,
-			ui.chkNoSecurityIsolation, ui.chkNoSecurityFiltering, ui.chkHostProtect, ui.chkRamBox, NULL };
+	if (!g_CertInfo.opt_sec) {
+		QWidget* ExWidgets[] = { ui.chkSecurityMode, ui.chkLockDown, ui.chkRestrictDevices, ui.chkPrivacy, ui.chkUseSpecificity, ui.chkNoSecurityIsolation, ui.chkNoSecurityFiltering, ui.chkHostProtect, NULL };
 		for (QWidget** ExWidget = ExWidgets; *ExWidget != NULL; ExWidget++)
 			COptionsWindow__AddCertIcon(*ExWidget);
 	}
-	if (!CERT_IS_LEVEL(g_CertInfo, eCertStandard2))
+	if (!g_CertInfo.active)
+		COptionsWindow__AddCertIcon(ui.chkRamBox, true);
+	if (!g_CertInfo.opt_enc) {
 		COptionsWindow__AddCertIcon(ui.chkConfidential, true);
-	if (!CERT_IS_LEVEL(g_CertInfo, eCertAdvanced1))
 		COptionsWindow__AddCertIcon(ui.chkEncrypt, true);
+		COptionsWindow__AddCertIcon(ui.chkAllowEfs, true);
+	}
 
 
 	m_HoldBoxType = false;
@@ -157,6 +158,7 @@ void COptionsWindow::CreateGeneral()
 	connect(ui.chkDropRights, SIGNAL(clicked(bool)), this, SLOT(OnGeneralChanged()));
 	connect(ui.chkFakeElevation, SIGNAL(clicked(bool)), this, SLOT(OnGeneralChanged()));
 	connect(ui.chkMsiExemptions, SIGNAL(clicked(bool)), this, SLOT(OnGeneralChanged()));
+	connect(ui.chkACLs, SIGNAL(clicked(bool)), this, SLOT(OnGeneralChanged()));
 	
 	connect(ui.chkBlockSpooler, SIGNAL(clicked(bool)), this, SLOT(OnGeneralChanged()));
 	connect(ui.chkOpenSpooler, SIGNAL(clicked(bool)), this, SLOT(OnGeneralChanged()));
@@ -228,6 +230,8 @@ void COptionsWindow::CreateGeneral()
 
 	connect(ui.chkRawDiskRead, SIGNAL(clicked(bool)), this, SLOT(OnGeneralChanged()));
 	connect(ui.chkRawDiskNotify, SIGNAL(clicked(bool)), this, SLOT(OnGeneralChanged()));
+	
+	connect(ui.chkAllowEfs, SIGNAL(clicked(bool)), this, SLOT(OnGeneralChanged()));
 
 	connect(ui.btnAddCmd, SIGNAL(clicked(bool)), this, SLOT(OnAddCommand()));
 	QMenu* pRunBtnMenu = new QMenu(ui.btnAddCmd);
@@ -238,6 +242,8 @@ void COptionsWindow::CreateGeneral()
 	connect(ui.btnCmdDown, SIGNAL(clicked(bool)), this, SLOT(OnCommandDown()));
 	connect(ui.btnDelCmd, SIGNAL(clicked(bool)), this, SLOT(OnDelCommand()));
 	connect(ui.treeRun, SIGNAL(itemChanged(QTreeWidgetItem *, int)), this, SLOT(OnRunChanged()));
+
+	connect(ui.txtNotes, SIGNAL(textChanged()), this, SLOT(OnGeneralChanged()));
 }
 
 void COptionsWindow::LoadGeneral()
@@ -277,14 +283,11 @@ void COptionsWindow::LoadGeneral()
 	ui.chkDropRights->setChecked(m_pBox->GetBool("DropAdminRights", false));
 	ui.chkFakeElevation->setChecked(m_pBox->GetBool("FakeAdminRights", false));
 	ui.chkMsiExemptions->setChecked(m_pBox->GetBool("MsiInstallerExemptions", false));
+	ui.chkACLs->setChecked(m_pBox->GetBool("UseOriginalACLs", false));
 
 	ui.chkBlockSpooler->setChecked(m_pBox->GetBool("ClosePrintSpooler", false));
 	ui.chkOpenSpooler->setChecked(m_pBox->GetBool("OpenPrintSpooler", false));
 	ui.chkPrintToFile->setChecked(m_pBox->GetBool("AllowSpoolerPrintToFile", false));
-
-	ui.lineSingleMemory->setText(m_pBox->GetText("ProcessMemoryLimit", ""));
-	ui.lineTotalMemory->setText(m_pBox->GetText("TotalMemoryLimit", ""));
-	ui.lineTotalNumber->setText(m_pBox->GetText("TotalNumberLimit", ""));
 
 	//ui.chkOpenProtectedStorage->setChecked(m_pBox->GetBool("OpenProtectedStorage", false));
 	ui.chkOpenProtectedStorage->setChecked(m_BoxTemplates.contains("OpenProtectedStorage"));
@@ -339,10 +342,10 @@ void COptionsWindow::LoadGeneral()
 	ui.chkForceProtection->setChecked(m_pBox->GetBool("ForceProtectionOnMount", false));
 	ui.chkUserOperation->setChecked(m_pBox->GetBool("BlockInterferenceControl", false));
 	ui.chkCoverBar->setChecked(m_pBox->GetBool("AllowCoverTaskbar", false));
-	if (ui.chkRamBox->isEnabled()) {
+	if (ui.chkRamBox->isEnabled())
 		ui.chkEncrypt->setEnabled(!ui.chkRamBox->isChecked());
-		ui.chkForceProtection->setEnabled(!ui.chkRamBox->isChecked());
-	}
+	ui.chkForceProtection->setEnabled(ui.chkEncrypt->isEnabled() && ui.chkEncrypt->isChecked());
+
 	CSandBoxPlus* pBoxEx = qobject_cast<CSandBoxPlus*>(m_pBox.data());
 	if (pBoxEx && QFile::exists(pBoxEx->GetBoxImagePath())) 
 	{
@@ -362,7 +365,7 @@ void COptionsWindow::LoadGeneral()
 	ui.txtCopyLimit->setText(QString::number(iLimit > 0 ? iLimit : 80 * 1024));
 	ui.chkCopyPrompt->setChecked(m_pBox->GetBool("PromptForFileMigration", true));
 	ui.chkNoCopyWarn->setChecked(!m_pBox->GetBool("CopyLimitSilent", false));
-	ui.chkDenyWrite->setChecked(m_pBox->GetBool("CopyBlockDenyWrite", false));
+	ui.chkDenyWrite->setChecked(!m_pBox->GetBool("CopyBlockDenyWrite", false));
 	ui.chkNoCopyMsg->setChecked(m_pBox->GetBool("NotifyNoCopy", false));
 	
 	LoadCopyRules();
@@ -377,6 +380,10 @@ void COptionsWindow::LoadGeneral()
 
 	ui.chkRawDiskRead->setChecked(m_pBox->GetBool("AllowRawDiskRead", false));
 	ui.chkRawDiskNotify->setChecked(m_pBox->GetBool("NotifyDirectDiskAccess", false));
+
+	ui.chkAllowEfs->setChecked(m_pBox->GetBool("EnableEFS", false));
+
+	ui.txtNotes->setPlainText(m_pBox->GetTextList("Note", false).join("\n"));
 
 	OnGeneralChanged();
 
@@ -421,17 +428,11 @@ void COptionsWindow::SaveGeneral()
 	WriteAdvancedCheck(ui.chkDropRights, "DropAdminRights", "y", "");
 	WriteAdvancedCheck(ui.chkFakeElevation, "FakeAdminRights", "y", "");
 	WriteAdvancedCheck(ui.chkMsiExemptions, "MsiInstallerExemptions", "y", "");
+	WriteAdvancedCheck(ui.chkACLs, "UseOriginalACLs", "y", "");
 
 	WriteAdvancedCheck(ui.chkBlockSpooler, "ClosePrintSpooler", "y", "");
 	WriteAdvancedCheck(ui.chkOpenSpooler, "OpenPrintSpooler", "y", "");
 	WriteAdvancedCheck(ui.chkPrintToFile, "AllowSpoolerPrintToFile", "y", "");
-
-	if (!ui.lineSingleMemory->text().isEmpty()) WriteText("ProcessMemoryLimit", ui.lineSingleMemory->text());
-	else m_pBox->DelValue("ProcessMemoryLimit");
-	if (!ui.lineTotalMemory->text().isEmpty()) WriteText("TotalMemoryLimit", ui.lineTotalMemory->text());
-	else m_pBox->DelValue("TotalMemoryLimit");
-	if (!ui.lineTotalNumber->text().isEmpty()) WriteText("ProcessNumberLimit", ui.lineTotalNumber->text());
-	else m_pBox->DelValue("ProcessNumberLimit");
 
 	//WriteAdvancedCheck(ui.chkOpenProtectedStorage, "OpenProtectedStorage", "y", "");
 	SetTemplate("OpenProtectedStorage", ui.chkOpenProtectedStorage->isChecked());
@@ -455,7 +456,7 @@ void COptionsWindow::SaveGeneral()
 	//WriteTextList("RunCommand", RunCommands);
 	m_pBox->DelValue("RunCommand");
 	foreach(const QString& Value, RunCommands)
-		m_pBox->InsertText("RunCommand", Value);
+		m_pBox->AppendText("RunCommand", Value);
 
 
 	if (ui.cmbVersion->isEnabled()) 
@@ -495,7 +496,7 @@ void COptionsWindow::SaveGeneral()
 
 	WriteAdvancedCheck(ui.chkCopyPrompt, "PromptForFileMigration", "", "n");
 	WriteAdvancedCheck(ui.chkNoCopyWarn, "CopyLimitSilent", "", "y");
-	WriteAdvancedCheck(ui.chkDenyWrite, "CopyBlockDenyWrite", "y", "");
+	WriteAdvancedCheck(ui.chkDenyWrite, "CopyBlockDenyWrite", "", "y");
 	WriteAdvancedCheck(ui.chkNoCopyMsg, "NotifyNoCopy", "y", "");
 
 	if (ui.chkProtectBox->checkState() == Qt::Checked) {
@@ -514,6 +515,12 @@ void COptionsWindow::SaveGeneral()
 
 	WriteAdvancedCheck(ui.chkRawDiskRead, "AllowRawDiskRead", "y", "");
 	WriteAdvancedCheck(ui.chkRawDiskNotify, "NotifyDirectDiskAccess", "y", "");
+
+	WriteAdvancedCheck(ui.chkAllowEfs, "EnableEFS", "y", "");
+
+	m_pBox->DelValue("Note");
+	foreach(const QString& Value, ui.txtNotes->toPlainText().split("\n"))
+		m_pBox->AppendText("Note", Value);
 
 	m_GeneralChanged = false;
 }
@@ -845,7 +852,7 @@ void COptionsWindow::UpdateBoxSecurity()
 void COptionsWindow::OnSecurityMode()
 {
 	if (ui.chkSecurityMode->isChecked() || (ui.chkLockDown->isEnabled() && ui.chkLockDown->isChecked()) || (ui.chkRestrictDevices->isEnabled() && ui.chkRestrictDevices->isChecked()))
-		theGUI->CheckCertificate(this);
+		theGUI->CheckCertificate(this, 0);
 
 	UpdateBoxSecurity();
 
@@ -998,7 +1005,7 @@ void COptionsWindow::OnBrowsePath()
 	
 	QVariantMap Entry;
 	Entry["Name"] = Name;
-	Entry["Command"] = "\"" + (pBoxEx ? pBoxEx->MakeBoxCommand(Value) : Value) + "\"";
+	Entry["Command"] = (pBoxEx ? pBoxEx->MakeBoxCommand(Value) : Value);
 	AddRunItem(ui.treeRun, Entry);
 
 	m_GeneralChanged = true;
@@ -1158,6 +1165,8 @@ void COptionsWindow::OnDiskChanged()
 		ui.chkForceProtection->setEnabled(ui.chkEncrypt->isChecked());
 	}
 	
+	ui.chkForceProtection->setEnabled(ui.chkEncrypt->isEnabled() && ui.chkEncrypt->isChecked());
+
 	OnGeneralChanged();
 }
 
